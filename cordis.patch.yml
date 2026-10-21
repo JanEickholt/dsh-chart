@@ -1,0 +1,6 @@
+# dsh-chart bundle patch: registers the show_chart host tool. The client half
+# (toolview row) is discovered from the dsh.client manifest in package.json.
+
+- insert:
+    - id: chart
+      name: 'dsh-chart'

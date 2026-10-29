@@ -19,14 +19,15 @@ export const inject = ['slots', 'locale']
 
 /** Structural surface of the browser slots service (packages/client/ui-slots). */
 interface SlotsLike {
-  inject(name: string, register: () => unknown): void
+  /** The callback runs once per declaration lifetime of the slot and returns that lifetime's disposer. */
+  inject(name: string, register: () => () => void): () => void
   register(entry: {
     readonly name: string
     readonly key?: string
     readonly id?: string
     readonly order?: number
     readonly locale?: string
-  }, component: unknown): unknown
+  }, component: unknown): () => void
 }
 
 /** Structural surface of the browser locale service (packages/client/locale). */
@@ -44,10 +45,10 @@ export function apply(ctx: ClientContextLike): void {
   const locale = ctx.get('locale') as LocaleLike | undefined
   if (slots === undefined || locale === undefined) return
   ctx.effect(() => locale.register(LOCALE_NS, localeDict) ?? undefined, 'locale: dsh-chart')
-  slots.inject('tool.call.toolview', () => {
-    slots.register({ name: 'tool.call.toolview', key: 'show_chart', locale: LOCALE_NS }, ChartRow)
-  })
-  slots.inject('conversation.chat.turnTail', () => {
-    slots.register({ name: 'conversation.chat.turnTail', id: 'dsh-chart-turn', order: 1, locale: LOCALE_NS }, ChartTail)
-  })
+  // Return the registration disposer: the inject contract (SlotInjectionEffect)
+  // tears each declaration lifetime down through it on slot collapse or unload.
+  slots.inject('tool.call.toolview', () =>
+    slots.register({ name: 'tool.call.toolview', key: 'show_chart', locale: LOCALE_NS }, ChartRow))
+  slots.inject('conversation.chat.turnTail', () =>
+    slots.register({ name: 'conversation.chat.turnTail', id: 'dsh-chart-turn', order: 1, locale: LOCALE_NS }, ChartTail))
 }

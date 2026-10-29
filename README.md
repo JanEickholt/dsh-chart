@@ -18,12 +18,15 @@ with a small JSON spec; the web client validates it and draws it with
   locale namespace:
   - `conversation.chat.turnTail` — the chart lives at the END of the turn,
     after the final assistant message, so it survives collapsed thinking and
-    tool rows. It walks the turn's tool-call nodes and renders every valid
-    `show_chart` spec; failed calls are skipped (they stay in their row).
-    Selector contract: `useChat` must return identity-stable values —
-    `useChat((s) => s)` for the snapshot, derive with `useMemo`. A selector
-    that builds a fresh array per call makes `useSyncExternalStore` loop
-    forever and freezes the tab.
+    tool rows. It walks the turn's tool-call nodes (including PTC sub-calls)
+    and renders every valid `show_chart` spec; failed calls are skipped (they
+    stay in their row). Selector contract: `useChat` must return
+    identity-stable values. The tail selects the turn's identity-stable
+    `nodes.turnDataSource(turn, 'tool-call')` and subscribes to it, so it only
+    re-renders when that turn's tool calls change — selecting the whole
+    snapshot would re-render every chart on each streamed delta, and a
+    selector that builds a fresh array per call makes `useSyncExternalStore`
+    loop forever and freezes the tab.
   - `tool.call.toolview` (key `show_chart`) — a compact static summary of the
     call. Failed calls auto-open with their error text.
   Both parse the call's COMPLETE raw args (never a streaming prefix) and

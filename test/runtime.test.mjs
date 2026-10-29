@@ -78,10 +78,12 @@ test('client half: bundle self-registers under the package id and injects the to
   const slotCalls = []
   const localeCalls = []
   const registeredComponents = []
+  const injectEffects = []
   const slots = {
     inject(name, register) {
       slotCalls.push(name)
-      register()
+      injectEffects.push(register())
+      return () => {}
     },
     register(entry, component) {
       slotCalls.push(entry)
@@ -106,6 +108,42 @@ test('client half: bundle self-registers under the package id and injects the to
   assert.equal(registeredComponents.length, 2)
   assert.equal(typeof registeredComponents[0], 'function', 'ChartRow component registered')
   assert.equal(typeof registeredComponents[1], 'function', 'ChartTail component registered')
+  // SlotInjectionEffect contract: each inject callback returns its registration disposer.
+  assert.deepEqual(injectEffects.map((effect) => typeof effect), ['function', 'function'])
+
+  // ChartTail: subscribes to the Turn's tool-call source only, renders root and
+  // PTC sub-call charts in call order, and skips failed or malformed calls.
+  const { renderToStaticMarkup } = require('react-dom/server')
+  const { createElement } = require('react')
+  const ChartTail = registeredComponents[1]
+  const chart = (title) => JSON.stringify({ type: 'pie', title, labels: ['1/3', '1/6', '1/6', '1/3'], values: [2, 1, 1, 2] })
+  const calls = [
+    { root: { kind: 'tool-result', call: { name: 'show_chart', argsRaw: chart('Root chart') }, isError: false, subCalls: [] } },
+    { root: { kind: 'tool-result', call: { name: 'show_chart', argsRaw: chart('Failed chart') }, isError: true, subCalls: [] } },
+    { root: { phase: 'start', name: 'show_chart', argsRaw: '{"type":"pie"', subCalls: [] } },
+    {
+      root: {
+        kind: 'tool-result',
+        call: { name: 'run_code', argsRaw: '{}' },
+        isError: false,
+        subCalls: [{ kind: 'tool-result', call: { name: 'show_chart', argsRaw: chart('Nested chart') }, isError: false, subCalls: [] }],
+      },
+    },
+  ]
+  const requested = []
+  const source = { getSnapshot: () => calls, subscribe: () => () => {} }
+  const snapshot = { nodes: { turnDataSource: (turn, kind) => { requested.push([turn, kind]); return source } } }
+  const html = renderToStaticMarkup(createElement(ChartTail, {
+    turn: { turn: 7 },
+    seq: 0,
+    openFile: () => {},
+    useChat: (select) => select(snapshot),
+    t: (key) => key,
+  }))
+  assert.deepEqual(requested, [[7, 'tool-call']])
+  assert.ok(html.indexOf('Root chart') !== -1 && html.indexOf('Nested chart') > html.indexOf('Root chart'), html)
+  assert.ok(!html.includes('Failed chart'), 'failed calls stay in their tool row')
+  assert.equal(html.match(/row\.data/g)?.length, 2)
 
   delete globalThis.window
 })

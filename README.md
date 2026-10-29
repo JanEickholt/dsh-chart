@@ -10,8 +10,10 @@ with a small JSON spec; the web client validates it and draws it with
 - **Host half** (`src/index.ts`) registers the `show_chart` tool via
   `ctx.tools.register(defineTool(...))`. The model passes
   `{ type, title?, labels, values, seriesName? }` and receives a canonical
-  confirmation value. Single validation authority: `src/chart-spec.ts`
-  (`parseChartSpec`), shared by both halves.
+  confirmation value; an invalid spec fails with the first violated
+  constraint (e.g. `labels has 3 entries but values has 2`) so the model can
+  repair the call. Single validation authority: `src/chart-spec.ts`
+  (`checkChartSpec` / `parseChartSpec`), shared by both halves.
 - **Client half** (`src/client/`) registers two slots plus the `dsh-chart`
   locale namespace:
   - `conversation.chat.turnTail` — the chart lives at the END of the turn,

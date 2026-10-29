@@ -59,26 +59,42 @@ export function buildChartSpec(args: ChartToolArgs): ChartSpec {
 /**
  * Validate an arbitrary payload as a chart spec. Single validation authority
  * for both halves: host execute (schema pre-validated args) and client rows
- * (untrusted logged argsRaw).
+ * (untrusted logged argsRaw). Failures name the first violated constraint so
+ * the model can repair its call.
  */
-export function parseChartSpec(raw: unknown): ChartSpec | null {
-  if (typeof raw !== 'object' || raw === null) return null
+export function checkChartSpec(raw: unknown): { readonly spec: ChartSpec } | { readonly error: string } {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { error: 'arguments must be a JSON object' }
   const record = raw as Record<string, unknown>
-  if (!isChartType(record.type)) return null
-  if (!Array.isArray(record.labels) || !Array.isArray(record.values)) return null
+  if (!isChartType(record.type)) return { error: `type must be one of ${CHART_TYPES.join(' | ')}` }
+  if (!Array.isArray(record.labels)) return { error: 'labels must be an array of strings' }
+  if (!Array.isArray(record.values)) return { error: 'values must be an array of numbers' }
   const count = record.labels.length
-  if (count === 0 || count !== record.values.length || count > MAX_POINTS) return null
-  if (!record.labels.every((label): label is string => typeof label === 'string')) return null
-  if (!record.values.every((value): value is number => typeof value === 'number' && Number.isFinite(value))) return null
-  if (record.title !== undefined && typeof record.title !== 'string') return null
-  if (record.seriesName !== undefined && typeof record.seriesName !== 'string') return null
-  return buildChartSpec({
-    type: record.type,
-    labels: record.labels,
-    values: record.values,
-    ...(record.title !== undefined ? { title: record.title } : {}),
-    ...(record.seriesName !== undefined ? { seriesName: record.seriesName } : {}),
-  })
+  if (count === 0) return { error: 'labels and values must not be empty' }
+  if (count !== record.values.length) {
+    return { error: `labels has ${count} entries but values has ${record.values.length}; they must align by index` }
+  }
+  if (count > MAX_POINTS) return { error: `${count} points exceed the limit of ${MAX_POINTS}; aggregate the data first` }
+  const badLabel = record.labels.findIndex((label) => typeof label !== 'string')
+  if (badLabel !== -1) return { error: `labels[${badLabel}] must be a string` }
+  const badValue = record.values.findIndex((value) => typeof value !== 'number' || !Number.isFinite(value))
+  if (badValue !== -1) return { error: `values[${badValue}] must be a finite number` }
+  if (record.title !== undefined && typeof record.title !== 'string') return { error: 'title must be a string' }
+  if (record.seriesName !== undefined && typeof record.seriesName !== 'string') return { error: 'seriesName must be a string' }
+  return {
+    spec: buildChartSpec({
+      type: record.type,
+      labels: record.labels as string[],
+      values: record.values as number[],
+      ...(record.title !== undefined ? { title: record.title } : {}),
+      ...(record.seriesName !== undefined ? { seriesName: record.seriesName } : {}),
+    }),
+  }
+}
+
+/** {@link checkChartSpec} without the reason: the spec, or null when invalid. */
+export function parseChartSpec(raw: unknown): ChartSpec | null {
+  const checked = checkChartSpec(raw)
+  return 'spec' in checked ? checked.spec : null
 }
 
 /** Parse a call's raw JSON argument string; null on malformed JSON. */
@@ -94,3 +110,4 @@ export function safeParse(raw: string): unknown {
 export function pieTotal(spec: ChartSpec): number {
   return spec.values.reduce((sum, value) => sum + Math.max(value, 0), 0)
 }
+

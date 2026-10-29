@@ -11,7 +11,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { CHART_TYPES, MAX_POINTS, parseChartSpec } from './chart-spec.ts'
+import { CHART_TYPES, MAX_POINTS, checkChartSpec } from './chart-spec.ts'
 
 export const name = 'chart'
 
@@ -87,14 +87,9 @@ const showChart = defineTool({
   // presentResult omitted: the generic card keeps the pending title and renders the confirmation text.
   isConcurrencySafe: () => true,
   async execute(args) {
-    const spec = parseChartSpec(args)
-    if (spec === null) {
-      throw new Error(
-        `invalid chart spec: type must be one of ${CHART_TYPES.join(' | ')}; labels and values must be non-empty `
-        + `aligned arrays of strings and finite numbers (at most ${MAX_POINTS} points)`,
-      )
-    }
-    return spec
+    const checked = checkChartSpec(args)
+    if ('error' in checked) throw new Error(`invalid chart spec: ${checked.error}`)
+    return checked.spec
   },
 })
 

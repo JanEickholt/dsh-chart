@@ -30,7 +30,10 @@ test('host half: apply registers the show_chart tool and it executes', async () 
   assert.deepEqual(value, { type: 'pie', title: 'T', labels: ['a', 'b', 'c'], values: [1, 2, 3] })
   assert.equal(typeof disposed, 'function')
 
-  await assert.rejects(registered.execute({ type: 'pie', labels: ['a'], values: [1, 2] }, {}), /invalid chart spec/)
+  await assert.rejects(
+    registered.execute({ type: 'pie', labels: ['a'], values: [1, 2] }, {}),
+    /invalid chart spec: labels has 1 entries but values has 2/,
+  )
 
   const content = registered.output.render(valid, value)
   assert.equal(content[0].type, 'text')

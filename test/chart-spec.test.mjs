@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildChartSpec, CHART_TYPES, MAX_POINTS, parseChartSpec } from '../lib/chart-spec.js'
+import { buildChartSpec, CHART_TYPES, checkChartSpec, MAX_POINTS, parseChartSpec } from '../lib/chart-spec.js'
 
 test('valid spec round-trips through parse', () => {
   const spec = parseChartSpec({ type: 'pie', title: 'Share', labels: ['a', 'b'], values: [1, 2], seriesName: 'x' })
@@ -59,4 +59,16 @@ test('buildChartSpec copies arrays and omits unset optionals', () => {
 
 test('CHART_TYPES covers pie, bar, line', () => {
   assert.deepEqual([...CHART_TYPES], ['pie', 'bar', 'line'])
+})
+
+test('checkChartSpec names the violated constraint', () => {
+  assert.deepEqual(checkChartSpec({ type: 'bar', labels: ['a', 'b', 'c'], values: [1, 2] }), {
+    error: 'labels has 3 entries but values has 2; they must align by index',
+  })
+  assert.match(checkChartSpec({ type: 'scatter', labels: ['a'], values: [1] }).error, /type must be one of pie \| bar \| line/)
+  assert.match(checkChartSpec({ type: 'bar', labels: ['a', 'b'], values: [1, Number.NaN] }).error, /values\[1\] must be a finite number/)
+  assert.match(checkChartSpec({ type: 'bar', labels: ['a', 2], values: [1, 2] }).error, /labels\[1\] must be a string/)
+  const labels = Array.from({ length: MAX_POINTS + 1 }, (_, i) => String(i))
+  assert.match(checkChartSpec({ type: 'line', labels, values: labels.map(Number) }).error, /exceed the limit of 100/)
+  assert.deepEqual(checkChartSpec({ type: 'pie', labels: ['a'], values: [1] }), { spec: { type: 'pie', labels: ['a'], values: [1] } })
 })

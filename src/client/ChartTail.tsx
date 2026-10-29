@@ -8,8 +8,8 @@
  */
 
 import { memo, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { ReactNode } from 'react'
-import { parseChartSpec, pieTotal, safeParse, type ChartSpec } from '../chart-spec.ts'
+import type { CSSProperties, ReactNode } from 'react'
+import { ellipsize, parseChartSpec, pieSlices, safeParse, TEXT_LIMITS, type ChartSpec } from '../chart-spec.ts'
 import { BarChart, DataTable, LineChart, PieChart } from './charts.tsx'
 import type { ChartLocaleKey } from './locale.ts'
 
@@ -106,18 +106,28 @@ const dataToggleStyle = {
 
 const ChartTailEntry = memo(function ChartTailEntry({ spec, t }: { readonly spec: ChartSpec; readonly t: Translate }): ReactNode {
   const [tableOpen, setTableOpen] = useState(false)
+  const slices = useMemo(
+    () => (spec.type === 'pie' ? pieSlices(spec, (count) => t('row.other', { count })).slices : null),
+    [spec, t],
+  )
   return (
     <div style={{ padding: '10px 2px 4px', maxWidth: 640 }}>
-      <div style={{ fontSize: 12, opacity: 0.8 }}>{spec.title !== undefined ? spec.title : t('row.title')}</div>
-      {spec.seriesName !== undefined && <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>{spec.seriesName}</div>}
-      {spec.type === 'pie'
-        ? (pieTotal(spec) > 0 ? <PieChart spec={spec} /> : <p style={{ fontSize: 13 }}>{t('row.empty')}</p>)
+      <CappedText style={{ fontSize: 12, opacity: 0.8 }} text={spec.title ?? t('row.title')} max={TEXT_LIMITS.title} />
+      {spec.seriesName !== undefined && <CappedText style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }} text={spec.seriesName} max={TEXT_LIMITS.seriesName} />}
+      {slices !== null
+        ? (slices.length > 0 ? <PieChart slices={slices} /> : <p style={{ fontSize: 13 }}>{t('row.empty')}</p>)
         : spec.type === 'bar' ? <BarChart spec={spec} /> : <LineChart spec={spec} />}
       <button type="button" style={dataToggleStyle} aria-expanded={tableOpen} onClick={() => { setTableOpen(!tableOpen) }}>{t('row.data')}</button>
       {tableOpen && <DataTable spec={spec} labelHead={t('row.label')} valueHead={spec.seriesName ?? t('row.value')} />}
     </div>
   )
 })
+
+/** One line of free text, ellipsized past `max` with the full text as its tooltip. */
+function CappedText({ text, max, style }: { readonly text: string; readonly max: number; readonly style: CSSProperties }): ReactNode {
+  const shown = ellipsize(text, max)
+  return <div style={{ ...style, overflowWrap: 'anywhere' }} title={shown === text ? undefined : text}>{shown}</div>
+}
 
 export interface ChartTailProps {
   /** Owning Turn; the turn ordinal inside keys the Location index. */

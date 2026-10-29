@@ -78,17 +78,28 @@ export function checkChartSpec(raw: unknown): { readonly spec: ChartSpec } | { r
   if (badLabel !== -1) return { error: `labels[${badLabel}] must be a string` }
   const badValue = record.values.findIndex((value) => typeof value !== 'number' || !Number.isFinite(value))
   if (badValue !== -1) return { error: `values[${badValue}] must be a finite number` }
-  if (record.title !== undefined && typeof record.title !== 'string') return { error: 'title must be a string' }
-  if (record.seriesName !== undefined && typeof record.seriesName !== 'string') return { error: 'seriesName must be a string' }
+  // Optional text fields: null (some models send it for "absent") and blank
+  // strings normalise to absent, so every consumer falls back to its default.
+  const title = optionalText(record.title)
+  if (title === false) return { error: 'title must be a string or null' }
+  const seriesName = optionalText(record.seriesName)
+  if (seriesName === false) return { error: 'seriesName must be a string or null' }
   return {
     spec: buildChartSpec({
       type: record.type,
       labels: record.labels as string[],
       values: record.values as number[],
-      ...(record.title !== undefined ? { title: record.title } : {}),
-      ...(record.seriesName !== undefined ? { seriesName: record.seriesName } : {}),
+      ...(title !== undefined ? { title } : {}),
+      ...(seriesName !== undefined ? { seriesName } : {}),
     }),
   }
+}
+
+/** An optional text field: the text, undefined when absent/null/blank, false when mistyped. */
+function optionalText(value: unknown): string | undefined | false {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'string') return false
+  return value.trim() === '' ? undefined : value
 }
 
 /** {@link checkChartSpec} without the reason: the spec, or null when invalid. */
@@ -104,11 +115,6 @@ export function safeParse(raw: string): unknown {
   } catch {
     return null
   }
-}
-
-/** Sum of non-negative values — pie renderings need a positive total. */
-export function pieTotal(spec: ChartSpec): number {
-  return spec.values.reduce((sum, value) => sum + Math.max(value, 0), 0)
 }
 
 /**
@@ -164,3 +170,63 @@ export function sliceColor(index: number, count: number): string {
   const last = count > 1 && index === count - 1
   return SERIES_COLORS[last ? WRAP_SUBSTITUTE[slot] ?? slot : slot]!
 }
+
+/** Colour of the folded "Other" slice: neutral, apart from its violet and blue neighbours in both themes. */
+export const OTHER_COLOR = '#7d7d85'
+
+/**
+ * Most slices a pie draws: one per palette colour. Past this the smallest
+ * slices fold into one "Other" slice so no two slices share a hue.
+ */
+export const MAX_SLICES = SERIES_COLORS.length
+
+/** One drawn pie slice; `folded` is set on the "Other" slice and counts the slices it absorbed. */
+export interface PieSlice {
+  readonly label: string
+  readonly value: number
+  readonly folded?: number
+}
+
+/** The slices a pie actually draws, plus what it left out. */
+export interface PieSlices {
+  readonly slices: readonly PieSlice[]
+  /** Non-positive values: not shares of a whole, never drawn. */
+  readonly dropped: number
+  /** Positive values folded into the "Other" slice (0 when none). */
+  readonly folded: number
+}
+
+/**
+ * Pie geometry input: positive values only, in call order. When more than
+ * {@link MAX_SLICES} remain, the largest MAX_SLICES - 1 keep their place and
+ * the rest sum into a trailing "Other" slice (ties keep the earlier slice).
+ * @param otherLabel - label for the folded slice, given how many it absorbed.
+ */
+export function pieSlices(spec: ChartSpec, otherLabel: (count: number) => string = (count) => `Other (${count})`): PieSlices {
+  const positive = spec.labels
+    .map((label, index) => ({ label, value: spec.values[index] ?? 0, index }))
+    .filter((slice) => slice.value > 0)
+  const dropped = spec.labels.length - positive.length
+  if (positive.length <= MAX_SLICES) return { slices: positive.map(({ label, value }) => ({ label, value })), dropped, folded: 0 }
+  const kept = new Set(
+    [...positive].sort((a, b) => b.value - a.value || a.index - b.index).slice(0, MAX_SLICES - 1).map((slice) => slice.index),
+  )
+  const slices: PieSlice[] = []
+  let rest = 0
+  for (const slice of positive) {
+    if (kept.has(slice.index)) slices.push({ label: slice.label, value: slice.value })
+    else rest += slice.value
+  }
+  const folded = positive.length - kept.size
+  slices.push({ label: otherLabel(folded), value: rest, folded })
+  return { slices, dropped, folded }
+}
+
+/** Display cap for free text: at most `max` code points, the last one an ellipsis. */
+export function ellipsize(text: string, max: number): string {
+  const chars = Array.from(text)
+  return chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : text
+}
+
+/** Display caps; the full text stays in tooltips (title attribute) and the data table. */
+export const TEXT_LIMITS = { title: 120, row: 80, seriesName: 80, legend: 32, axis: 10 } as const

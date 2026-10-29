@@ -65,7 +65,15 @@ pnpm test          # build + node --test smoke tests
 
 - Single series only. Multi-series (the `type/title/x/y[]/unit/data[]`
   shape) is the upgrade trigger when needed.
-- `pie` treats negative/zero values as non-slices (shares of a whole).
+- `pie` treats negative/zero values as non-slices (shares of a whole) and
+  draws at most 8 slices: past that the 7 largest keep their place and the
+  rest fold into a grey "Other (n)" slice. The confirmation sent back to the
+  model and the tool-row summary count only drawn slices and name what was
+  folded or dropped; the "Show data" table always lists every value.
+- `title` and `seriesName` accept `null`; null or blank text counts as absent
+  (the chart falls back to "Chart"). Long text is ellipsized on screen
+  (title 120, legend 32, axis 10 characters) with the full text in the
+  tooltip / `title` attribute and the data table.
 - At most 100 points; beyond that the tool errors and the model should
   aggregate first.
 - No mermaid/diagram support — that would be a separate tool + toolview

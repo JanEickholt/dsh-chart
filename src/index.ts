@@ -11,7 +11,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { CHART_TYPES, MAX_POINTS, checkChartSpec } from './chart-spec.ts'
+import { CHART_TYPES, MAX_POINTS, MAX_SLICES, TEXT_LIMITS, checkChartSpec, ellipsize, parseChartSpec, pieSlices } from './chart-spec.ts'
 
 export const name = 'chart'
 
@@ -34,10 +34,12 @@ const showChart = defineTool({
       type: 'string',
       enum: [...CHART_TYPES],
       required: true,
-      description: `Chart kind. pie: shares of a whole (non-negative values). bar: compare discrete values. line: trend over ordered points. One of: ${CHART_TYPES.join(' | ')}.`,
+      description: `Chart kind. pie: shares of a whole (positive values; past ${MAX_SLICES} slices the smallest fold into "Other"). bar: compare discrete values. line: trend over ordered points. One of: ${CHART_TYPES.join(' | ')}.`,
     },
+    // Optional text fields accept null: some models send it for "absent".
+    // checkChartSpec normalises null and blank text to absent.
     title: {
-      type: 'string',
+      oneOf: [{ type: 'string' }, { type: 'null' }],
       description: 'Short chart title shown above the chart.',
     },
     labels: {
@@ -53,7 +55,7 @@ const showChart = defineTool({
       description: 'Numeric values, aligned with labels by index. Finite numbers only.',
     },
     seriesName: {
-      type: 'string',
+      oneOf: [{ type: 'string' }, { type: 'null' }],
       description: 'Optional name of the data series (shown as a small legend note).',
     },
   },
@@ -69,20 +71,11 @@ const showChart = defineTool({
       },
       additionalProperties: false,
     },
-    render: (_args, value) => {
-      // Value-object properties are optional in the inferred type (output
-      // schemas cannot mark properties required); the canonical value from
-      // execute always carries type/labels/values.
-      const count = value.labels?.length ?? 0
-      const type = value.type ?? 'chart'
-      return [
-        { type: 'text' as const, text: `Chart displayed: ${type}${value.title !== undefined ? ` "${value.title}"` : ''} — ${count} ${type === 'pie' ? 'slices' : 'points'}.` },
-      ]
-    },
+    render: (_args, value) => [{ type: 'text' as const, text: confirmation(value) }],
   },
   presentCall: (args) => ({
     card: 'generic' as const,
-    title: `Chart: ${args.title ?? args.type}`,
+    title: `Chart: ${args.title !== undefined && args.title !== null && args.title.trim() !== '' ? ellipsize(args.title, TEXT_LIMITS.row) : args.type}`,
   }),
   // presentResult omitted: the generic card keeps the pending title and renders the confirmation text.
   isConcurrencySafe: () => true,
@@ -92,6 +85,25 @@ const showChart = defineTool({
     return checked.spec
   },
 })
+
+/**
+ * Model-facing confirmation of what was drawn. A pie counts only the slices it
+ * draws and says what it left out, so the model's account of the chart matches
+ * the picture.
+ */
+function confirmation(value: unknown): string {
+  const spec = parseChartSpec(value)
+  if (spec === null) return 'Chart displayed.'
+  const head = `Chart displayed: ${spec.type}${spec.title !== undefined ? ` "${spec.title}"` : ''}`
+  if (spec.type !== 'pie') return `${head} — ${spec.labels.length} points.`
+  const { slices, dropped, folded } = pieSlices(spec)
+  const notes: string[] = []
+  if (folded > 0) notes.push(`the ${folded} smallest folded into "${slices.at(-1)!.label}"`)
+  if (dropped > 0) notes.push(`${dropped} non-positive ${dropped === 1 ? 'value' : 'values'} not drawn`)
+  const suffix = notes.length > 0 ? ` (${notes.join('; ')})` : ''
+  if (slices.length === 0) return `${head} — nothing drawn: a pie needs positive values${suffix}.`
+  return `${head} — ${slices.length} ${slices.length === 1 ? 'slice' : 'slices'}${suffix}.`
+}
 
 export function apply(ctx: Context): void {
   const tools = (ctx as unknown as { tools?: ToolsLike }).tools

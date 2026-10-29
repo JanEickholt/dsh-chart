@@ -42,6 +42,25 @@ test('host half: apply registers the show_chart tool and it executes', async () 
   const view = registered.presentCall(valid)
   assert.deepEqual(view, { card: 'generic', title: 'Chart: T' })
 
+  // Optional text accepts null (schema + normalisation) and blank falls back.
+  const nullable = { type: 'pie', title: null, seriesName: null, labels: ['a'], values: [1] }
+  assert.deepEqual(await registered.execute(nullable, {}), { type: 'pie', labels: ['a'], values: [1] })
+  assert.deepEqual(registered.presentCall(nullable), { card: 'generic', title: 'Chart: pie' })
+  assert.deepEqual(registered.presentCall({ ...nullable, title: '  ' }), { card: 'generic', title: 'Chart: pie' })
+  assert.equal(Array.from(registered.presentCall({ ...nullable, title: 'x'.repeat(300) }).title).length, 'Chart: '.length + 80)
+
+  // The confirmation counts drawn slices and says what was left out.
+  const many = { type: 'pie', labels: 'abcdefghijkl'.split(''), values: [5, 1, 9, 2, 8, 3, 7, 0.5, 6, 4, 10, 0] }
+  assert.equal(
+    registered.output.render(many, await registered.execute(many, {}))[0].text,
+    'Chart displayed: pie — 8 slices (the 4 smallest folded into "Other (4)"; 1 non-positive value not drawn).',
+  )
+  const empty = { type: 'pie', labels: ['a', 'b'], values: [0, -2] }
+  assert.equal(
+    registered.output.render(empty, await registered.execute(empty, {}))[0].text,
+    'Chart displayed: pie — nothing drawn: a pie needs positive values (2 non-positive values not drawn).',
+  )
+
   assert.equal(registered.isConcurrencySafe(valid), true)
   assert.equal(registered.parameters.type, 'object')
 })
@@ -144,6 +163,44 @@ test('client half: bundle self-registers under the package id and injects the to
   assert.ok(html.indexOf('Root chart') !== -1 && html.indexOf('Nested chart') > html.indexOf('Root chart'), html)
   assert.ok(!html.includes('Failed chart'), 'failed calls stay in their tool row')
   assert.equal(html.match(/row\.data/g)?.length, 2)
+
+  // A many-slice pie draws at most 8 slices (Other last) in an HTML legend;
+  // long titles and legend labels are ellipsized with the full text as title.
+  const longTitle = 'T'.repeat(200)
+  const longLabel = 'L'.repeat(60)
+  const many = JSON.stringify({ type: 'pie', title: longTitle, labels: [longLabel, ...'bcdefghijkl'.split('')], values: [50, 1, 9, 2, 8, 3, 7, 0.5, 6, 4, 10, 1] })
+  const manyCalls = [{ root: { kind: 'tool-result', call: { name: 'show_chart', argsRaw: many }, isError: false, subCalls: [] } }]
+  const manySource = { getSnapshot: () => manyCalls, subscribe: () => () => {} }
+  const manyHtml = renderToStaticMarkup(createElement(ChartTail, {
+    turn: { turn: 1 },
+    seq: 0,
+    openFile: () => {},
+    useChat: (select) => select({ nodes: { turnDataSource: () => manySource } }),
+    t: (key, params) => (key === 'row.other' ? `Other (${params.count})` : key),
+  }))
+  assert.equal(manyHtml.match(/<li /g)?.length, 8)
+  assert.ok(manyHtml.includes('Other (5)'), manyHtml)
+  assert.ok(manyHtml.includes(`title="${longTitle}">${'T'.repeat(119)}…</div>`), 'title capped at 120 with full text in title attr')
+  assert.ok(manyHtml.includes(`title="${longLabel}">`) && manyHtml.includes(`${'L'.repeat(31)}…</li>`), 'legend label capped at 32')
+
+  // The tool row summary counts drawn slices too.
+  const ChartRow = registeredComponents[0]
+  const rowProps = (argsRaw) => ({
+    useDisclosure: () => ({ expanded: false, setExpanded: () => {}, toggle: () => {} }),
+    callId: 'c',
+    toolName: 'show_chart',
+    block: { kind: 'tool-result', call: { name: 'show_chart', argsRaw }, content: [], isError: false },
+    t: (key, params) => `${key}:${params?.count ?? ''}`,
+  })
+  const rowSummary = (argsRaw) => {
+    let collapsed
+    primitives.DisclosureRow = (props) => { collapsed = props.collapsedContent; return null }
+    renderToStaticMarkup(createElement(ChartRow, rowProps(argsRaw)))
+    return renderToStaticMarkup(collapsed)
+  }
+  assert.match(rowSummary(many), />row\.slices:8</)
+  assert.match(rowSummary(JSON.stringify({ type: 'pie', labels: ['a', 'b', 'c'], values: [1, 0, -1] })), />row\.slices:1</)
+  assert.match(rowSummary(JSON.stringify({ type: 'pie', labels: ['a'], values: [0] })), />row\.empty:</)
 
   delete globalThis.window
 })

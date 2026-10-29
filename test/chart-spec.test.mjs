@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildChartSpec, CHART_TYPES, checkChartSpec, formatTick, formatValue, MAX_POINTS, parseChartSpec, SERIES_COLORS, sliceColor } from '../lib/chart-spec.js'
+import { buildChartSpec, CHART_TYPES, checkChartSpec, ellipsize, formatTick, formatValue, MAX_POINTS, MAX_SLICES, parseChartSpec, pieSlices, SERIES_COLORS, sliceColor } from '../lib/chart-spec.js'
 
 test('valid spec round-trips through parse', () => {
   const spec = parseChartSpec({ type: 'pie', title: 'Share', labels: ['a', 'b'], values: [1, 2], seriesName: 'x' })
@@ -105,4 +105,41 @@ test('sliceColor never gives touching slices one color, including the ring closu
   }
   assert.equal(sliceColor(0, 1), SERIES_COLORS[0])
   assert.deepEqual(Array.from({ length: 4 }, (_, index) => sliceColor(index, 4)), SERIES_COLORS.slice(0, 4))
+})
+
+test('null and blank optional text normalise to absent', () => {
+  assert.deepEqual(parseChartSpec({ type: 'bar', title: null, seriesName: null, labels: ['a'], values: [1] }), { type: 'bar', labels: ['a'], values: [1] })
+  assert.deepEqual(parseChartSpec({ type: 'bar', title: '   ', seriesName: '', labels: ['a'], values: [1] }), { type: 'bar', labels: ['a'], values: [1] })
+  assert.equal(parseChartSpec({ type: 'bar', title: ' T ', labels: ['a'], values: [1] }).title, ' T ')
+  assert.match(checkChartSpec({ type: 'bar', title: 3, labels: ['a'], values: [1] }).error, /title must be a string or null/)
+})
+
+test('pieSlices drops non-positive values and folds the smallest past MAX_SLICES into Other', () => {
+  assert.equal(MAX_SLICES, 8)
+  const small = pieSlices({ type: 'pie', labels: ['a', 'b', 'c'], values: [3, 0, -1] })
+  assert.deepEqual(small, { slices: [{ label: 'a', value: 3 }], dropped: 2, folded: 0 })
+
+  const exact = pieSlices({ type: 'pie', labels: 'abcdefgh'.split(''), values: [1, 2, 3, 4, 5, 6, 7, 8] })
+  assert.equal(exact.slices.length, 8)
+  assert.equal(exact.folded, 0)
+
+  // 12 positive slices: the 7 largest keep call order, the 5 smallest sum into Other.
+  const labels = 'abcdefghijkl'.split('')
+  const values = [5, 1, 9, 2, 8, 3, 7, 0.5, 6, 4, 10, 0]
+  const folded = pieSlices({ type: 'pie', labels, values })
+  assert.deepEqual(folded.slices.map((slice) => slice.label), ['a', 'c', 'e', 'g', 'i', 'j', 'k', 'Other (4)'])
+  assert.equal(folded.slices.at(-1).value, 1 + 2 + 3 + 0.5)
+  assert.equal(folded.slices.at(-1).folded, 4)
+  assert.equal(folded.dropped, 1)
+  assert.equal(folded.folded, 4)
+  // Ties keep the earlier slice; the label factory localises Other.
+  const ties = pieSlices({ type: 'pie', labels: 'abcdefghi'.split(''), values: [1, 1, 1, 1, 1, 1, 1, 1, 1] }, (count) => `Rest ${count}`)
+  assert.deepEqual(ties.slices.map((slice) => slice.label), ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'Rest 2'])
+})
+
+test('ellipsize caps by code point and leaves short text alone', () => {
+  assert.equal(ellipsize('short', 10), 'short')
+  assert.equal(ellipsize('abcdefghijk', 10), 'abcdefghi…')
+  assert.equal(ellipsize('😀😀😀😀😀', 3), '😀😀…')
+  assert.equal(Array.from(ellipsize('x'.repeat(500), 120)).length, 120)
 })

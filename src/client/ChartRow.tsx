@@ -14,7 +14,7 @@
 import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { DisclosureRow, IconDataOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
-import { parseChartSpec, safeParse } from '../chart-spec.ts'
+import { ellipsize, parseChartSpec, pieSlices, safeParse, TEXT_LIMITS } from '../chart-spec.ts'
 import type { ChartLocaleKey } from './locale.ts'
 
 type Translate = (key: ChartLocaleKey, params?: Record<string, string | number>) => string
@@ -82,12 +82,14 @@ export function ChartRow(props: ChartRowProps): ReactNode {
     toggle()
   }
 
-  const title = spec !== null && spec.title !== undefined ? spec.title : t('row.title')
+  const title = spec !== null && spec.title !== undefined ? ellipsize(spec.title, TEXT_LIMITS.row) : t('row.title')
+  // A pie counts the slices it draws: positive values, folded past MAX_SLICES.
+  const drawnSlices = spec !== null && spec.type === 'pie' ? pieSlices(spec).slices.length : 0
   const summary = preparing
     ? t('row.preparing')
     : spec !== null
       ? spec.type === 'pie'
-        ? t('row.slices', { count: spec.labels.length })
+        ? drawnSlices > 0 ? t('row.slices', { count: drawnSlices }) : t('row.empty')
         : t('row.summary', { type: spec.type, count: spec.labels.length })
       : failed ? t('row.error') : toolName
 

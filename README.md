@@ -29,8 +29,10 @@ with a small JSON spec; the web client validates it and draws it with
   Both parse the call's COMPLETE raw args (never a streaming prefix) and
   degrade to plain text on malformed payloads. A "Show data" toggle reveals
   the raw spec as a table.
-- Charts use recharts (inlined in the client bundle) with DSH design tokens
-  (`--dsw-static-*`) and `currentColor` for theme safety.
+- Charts use recharts (inlined in the client bundle) with a fixed 8-hue
+  categorical palette validated for colour-vision separation on both the
+  light and dark chat surfaces, `currentColor` axes, and DSH alias tokens
+  (`--dsw-alias-*`) for the tooltip so it stays readable in either theme.
 
 ## Build
 

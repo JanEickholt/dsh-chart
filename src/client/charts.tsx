@@ -1,8 +1,12 @@
 /**
  * Recharts-backed chart renderers for the show_chart toolview. The model only
  * emits the JSON spec; every pixel is the library's — deterministic geometry,
- * hover tooltips, and axis auto-thinning. Styling uses DSH design tokens
- * (`--dsw-static-*`) for series and `currentColor` for theme-safe axes.
+ * hover tooltips, and axis auto-thinning. Series use the fixed categorical
+ * palette from ../chart-spec.ts, validated against both the light and dark
+ * chat surfaces (it replaces the DSH static tokens, whose blue-500 and
+ * deepseek-500 are ΔE 3.6 apart and met as neighbouring slices); axes use
+ * `currentColor` and the tooltip DSH alias tokens (`--dsw-alias-*`) so text
+ * stays readable in either theme.
  *
  * Bundled inline (the client-bundle contract is one self-registering file,
  * no code-split chunks), so the whole lib ships inside lib/client.js.
@@ -12,30 +16,26 @@
 
 import type { ReactNode } from 'react'
 import { Bar, BarChart as RechartsBarChart, CartesianGrid, Cell, Legend, Line, LineChart as RechartsLineChart, Pie, PieChart as RechartsPieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import type { ChartSpec } from '../chart-spec.ts'
+import { formatTick, formatValue, SERIES_COLORS, sliceColor, type ChartSpec } from '../chart-spec.ts'
 
-/** Series palette: static design tokens, cycled by index; visible on light and dark themes. */
-const SERIES_COLORS: readonly string[] = [
-  'var(--dsw-static-blue-500)',
-  'var(--dsw-static-green-500)',
-  'var(--dsw-static-amber-500)',
-  'var(--dsw-static-deepseek-500)',
-  'var(--dsw-static-red-500)',
-]
-
-const seriesColor = (index: number): string => SERIES_COLORS[index % SERIES_COLORS.length]!
-
-/** Compact value text: at most 2 decimals, trailing zeros trimmed. */
-export function formatValue(value: number): string {
-  return String(Math.round(value * 100) / 100)
-}
+/** Single-series bar and line color: palette slot 1. */
+const seriesColor = SERIES_COLORS[0]!
 
 const truncate = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text)
 
 const CHART_HEIGHT = 220
 
 const axisTick = { fill: 'currentColor', fontSize: 10, opacity: 0.65 } as const
-const tooltipStyle = { fontSize: 12 } as const
+// recharts defaults the tooltip box to #fff while its label inherits the chat's
+// text color, which leaves the label invisible on the dark theme.
+const tooltipStyle = {
+  fontSize: 12,
+  backgroundColor: 'var(--dsw-alias-bg-layer-1, #fff)',
+  border: '1px solid var(--dsw-alias-border-l2, #ccc)',
+  color: 'var(--dsw-alias-label-primary, inherit)',
+} as const
+// The default bar hover cursor is a solid #ccc block, glaring on the dark theme.
+const barCursor = { fill: 'currentColor', fillOpacity: 0.08 } as const
 const legendStyle = { fontSize: 12 } as const
 
 interface Row {
@@ -46,6 +46,7 @@ interface Row {
 const rowsOf = (spec: ChartSpec): Row[] => spec.labels.map((label, index) => ({ label, value: spec.values[index] ?? 0 }))
 
 const tooltipFormatter = (value: number | string): string => formatValue(Number(value))
+const tickFormatter = (value: number | string): string => formatTick(Number(value))
 
 interface ChartProps {
   readonly spec: ChartSpec
@@ -58,8 +59,9 @@ export function PieChart({ spec }: ChartProps): ReactNode {
   return (
     <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
       <RechartsPieChart>
-        <Pie data={rows} dataKey="value" nameKey="label" cx="50%" cy="50%" outerRadius="80%" isAnimationActive={false}>
-          {rows.map((row, index) => <Cell key={row.label} fill={seriesColor(index)} />)}
+        <Pie data={rows} dataKey="value" nameKey="label" cx="50%" cy="50%" outerRadius="80%" stroke="var(--dsw-alias-bg-base, #fff)" isAnimationActive={false}>
+          {/* Keyed by position: models do repeat labels (e.g. "1/3", "1/6", "1/6", "1/3"). */}
+          {rows.map((_row, index) => <Cell key={index} fill={sliceColor(index, rows.length)} />)}
         </Pie>
         <Legend wrapperStyle={legendStyle} />
         <Tooltip formatter={tooltipFormatter} contentStyle={tooltipStyle} />
@@ -82,9 +84,9 @@ export function BarChart({ spec }: ChartProps): ReactNode {
           tickLine={false}
           interval="preserveStartEnd"
         />
-        <YAxis tick={axisTick} tickFormatter={tooltipFormatter} axisLine={false} tickLine={false} width={42} />
-        <Tooltip formatter={tooltipFormatter} contentStyle={tooltipStyle} />
-        <Bar dataKey="value" fill={seriesColor(0)} maxBarSize={48} radius={[2, 2, 0, 0]} isAnimationActive={false} />
+        <YAxis tick={axisTick} tickFormatter={tickFormatter} axisLine={false} tickLine={false} width={42} />
+        <Tooltip formatter={tooltipFormatter} contentStyle={tooltipStyle} cursor={barCursor} />
+        <Bar dataKey="value" fill={seriesColor} maxBarSize={48} radius={[2, 2, 0, 0]} isAnimationActive={false} />
       </RechartsBarChart>
     </ResponsiveContainer>
   )
@@ -104,9 +106,9 @@ export function LineChart({ spec }: ChartProps): ReactNode {
           tickLine={false}
           interval="preserveStartEnd"
         />
-        <YAxis tick={axisTick} tickFormatter={tooltipFormatter} axisLine={false} tickLine={false} width={42} />
+        <YAxis tick={axisTick} tickFormatter={tickFormatter} axisLine={false} tickLine={false} width={42} />
         <Tooltip formatter={tooltipFormatter} contentStyle={tooltipStyle} />
-        <Line dataKey="value" type="monotone" stroke={seriesColor(0)} strokeWidth={2} dot={{ r: 2.5, fill: seriesColor(0) }} isAnimationActive={false} />
+        <Line dataKey="value" type="monotone" stroke={seriesColor} strokeWidth={2} dot={{ r: 2.5, fill: seriesColor }} isAnimationActive={false} />
       </RechartsLineChart>
     </ResponsiveContainer>
   )

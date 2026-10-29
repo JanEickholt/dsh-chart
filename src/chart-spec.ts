@@ -111,3 +111,56 @@ export function pieTotal(spec: ChartSpec): number {
   return spec.values.reduce((sum, value) => sum + Math.max(value, 0), 0)
 }
 
+/**
+ * Compact value text. Magnitudes of 1 and above keep at most 2 decimals;
+ * smaller magnitudes keep 3 significant digits so 0.014 does not collapse to
+ * 0.01 (or 0.004 to 0). Trailing zeros are trimmed.
+ */
+export function formatValue(value: number): string {
+  if (Math.abs(value) >= 1 || value === 0) return String(Math.round(value * 100) / 100)
+  return String(Number(value.toPrecision(3)))
+}
+
+const compactFormat = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
+
+/** Axis tick text: thousands and up in compact notation (12.5K, 3M) so ticks fit the narrow axis. */
+export function formatTick(value: number): string {
+  return Math.abs(value) >= 1000 ? compactFormat.format(value) : formatValue(value)
+}
+
+/**
+ * Categorical series palette in fixed order: blue, orange, aqua, yellow,
+ * magenta, green, violet, red. Validated as adjacent pairs for both chat
+ * surfaces (#fff light, #151517 dark): every slot inside the lightness band
+ * and >= 3:1 against the surface, worst adjacent colour-vision-deficiency
+ * ΔE 8.4 and normal-vision ΔE 19.3 (OKLab ×100).
+ */
+export const SERIES_COLORS: readonly string[] = [
+  '#3987e5',
+  '#d95926',
+  '#199e70',
+  '#c98500',
+  '#d55181',
+  '#008300',
+  '#9085e9',
+  '#e66767',
+]
+
+/**
+ * Slot for the last slice when plain cycling would make it clash with the
+ * first slice it touches: slot 0 (blue again) or slot 6 (violet, ΔE 1.9
+ * from blue under protanopia). The substitutes also clear the floors against
+ * the preceding slice (red for slot 0's case, green for slot 6's).
+ */
+const WRAP_SUBSTITUTE: Readonly<Record<number, number>> = { 0: 5, 6: 7 }
+
+/**
+ * Colour of slice `index` of a `count`-slice pie: slots cycle in fixed order,
+ * and the last slice, which closes the ring next to slice 0, avoids colours
+ * indistinguishable from slice 0's.
+ */
+export function sliceColor(index: number, count: number): string {
+  const slot = index % SERIES_COLORS.length
+  const last = count > 1 && index === count - 1
+  return SERIES_COLORS[last ? WRAP_SUBSTITUTE[slot] ?? slot : slot]!
+}

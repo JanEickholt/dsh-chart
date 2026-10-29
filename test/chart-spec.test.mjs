@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildChartSpec, CHART_TYPES, checkChartSpec, MAX_POINTS, parseChartSpec } from '../lib/chart-spec.js'
+import { buildChartSpec, CHART_TYPES, checkChartSpec, formatTick, formatValue, MAX_POINTS, parseChartSpec, SERIES_COLORS, sliceColor } from '../lib/chart-spec.js'
 
 test('valid spec round-trips through parse', () => {
   const spec = parseChartSpec({ type: 'pie', title: 'Share', labels: ['a', 'b'], values: [1, 2], seriesName: 'x' })
@@ -71,4 +71,38 @@ test('checkChartSpec names the violated constraint', () => {
   const labels = Array.from({ length: MAX_POINTS + 1 }, (_, i) => String(i))
   assert.match(checkChartSpec({ type: 'line', labels, values: labels.map(Number) }).error, /exceed the limit of 100/)
   assert.deepEqual(checkChartSpec({ type: 'pie', labels: ['a'], values: [1] }), { spec: { type: 'pie', labels: ['a'], values: [1] } })
+})
+
+test('formatValue keeps small magnitudes significant', () => {
+  // Real call: "Cache hit (warmed)" 0.014 rendered as 0.01 before the fix.
+  assert.equal(formatValue(0.014), '0.014')
+  assert.equal(formatValue(0.004), '0.004')
+  assert.equal(formatValue(-0.123456), '-0.123')
+  assert.equal(formatValue(0), '0')
+  assert.equal(formatValue(-6.91), '-6.91')
+  assert.equal(formatValue(33.333333), '33.33')
+  assert.equal(formatValue(1234567), '1234567')
+})
+
+test('formatTick compacts large magnitudes for the narrow axis', () => {
+  assert.equal(formatTick(950), '950')
+  assert.equal(formatTick(12500), '12.5K')
+  assert.equal(formatTick(-3000000), '-3M')
+  assert.equal(formatTick(0.035), '0.035')
+})
+
+test('sliceColor never gives touching slices one color, including the ring closure', () => {
+  // Real call "Thirds and sixths" (4 slices): slices 4 and 1 touch; the old
+  // palette gave them blue-500 and deepseek-500 (ΔE 3.6).
+  const clashesWithFirst = new Set([SERIES_COLORS[0], SERIES_COLORS[6]])
+  for (let count = 2; count <= 40; count++) {
+    const colors = Array.from({ length: count }, (_, index) => sliceColor(index, count))
+    for (let index = 0; index < count; index++) {
+      const next = (index + 1) % count
+      assert.notEqual(colors[index], colors[next], `count ${count}: slices ${index} and ${next} share ${colors[index]}`)
+    }
+    assert.ok(!clashesWithFirst.has(colors[count - 1]), `count ${count}: last slice ${colors[count - 1]} clashes with the first`)
+  }
+  assert.equal(sliceColor(0, 1), SERIES_COLORS[0])
+  assert.deepEqual(Array.from({ length: 4 }, (_, index) => sliceColor(index, 4)), SERIES_COLORS.slice(0, 4))
 })
